@@ -1,0 +1,10 @@
+# Data download
+kagglehub==1.0.0
+
+# Dashboard creation (create_dashboard.py)
+requests==2.33.1
+
+# Superset (install in a separate Python 3.11 venv or conda env)
+# py -3.11 -m venv superset-venv
+# superset-venv\Scripts\python.exe -m pip install apache-superset
+apache-superset
