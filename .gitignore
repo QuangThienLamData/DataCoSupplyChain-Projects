@@ -1,0 +1,19 @@
+# Virtual environments
+.scmvenv/
+superset-venv/
+.venv*/
+venv/
+
+# Large data files (download via data_download.py or Kaggle)
+data/DataCoSupplyChainDataset.csv
+data/tokenized_access_logs.csv
+data/dataco.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db

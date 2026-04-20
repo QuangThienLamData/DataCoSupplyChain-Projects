@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  superset:
+    image: apache/superset:latest
+    container_name: dataco_superset
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    environment:
+      SUPERSET_SECRET_KEY: "dataco_supply_chain_secret_key_do_not_use_in_prod"
+      # Disable CSRF so the API creation script can POST without browser tokens
+      WTF_CSRF_ENABLED: "false"
+      TALISMAN_ENABLED: "false"
+    volumes:
+      - superset_home:/app/superset_home
+      # The SQLite DB created by load_to_sqlite.py is mounted read-only
+      - ./data:/app/data:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        superset db upgrade &&
+        superset fab create-admin \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --email admin@example.com \
+          --password admin 2>/dev/null || true &&
+        superset init &&
+        gunicorn \
+          --bind "0.0.0.0:8088" \
+          --workers 2 \
+          --worker-class gthread \
+          --threads 2 \
+          --timeout 120 \
+          --limit-request-line 0 \
+          --limit-request-field_size 0 \
+          "superset.app:create_app()"
+
+volumes:
+  superset_home:
