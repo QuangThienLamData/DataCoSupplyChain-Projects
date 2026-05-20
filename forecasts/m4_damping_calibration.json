@@ -1,0 +1,25 @@
+{
+  "DISASTER_DAMPING": 0.8728724395953086,
+  "DISASTER_calibration": {
+    "method": "OLS slope of implied_drag (1 \u2212 actual/expected_seasonal) on disaster_index, restricted to known-event rows where the hurricane calendar fired (primary) \u2014 falls back to broad sample if known-events sample is too small.",
+    "broad": {
+      "slope": 0.08179504543229345,
+      "r2": 0.01685908881724174,
+      "n": 853
+    },
+    "known_events_only": {
+      "slope": 0.8728724395953086,
+      "r2": 0.5679442368585219,
+      "n": 18
+    },
+    "selected": "known_events_only"
+  },
+  "LATE_DAMPING": 0.1,
+  "LATE_calibration": {
+    "slope": -0.6294911139335376,
+    "r2": 0.5829997048708487,
+    "n_rows": 765,
+    "source": "prior (no in-data signal)",
+    "prior": 0.1
+  }
+}

@@ -1,3 +1,8 @@
+# Jupyter notebook SQL analysis
+ipython-sql==0.5.0
+sqlalchemy==2.0.49
+ipykernel==7.2.0
+
 # Data download
 kagglehub==1.0.0
 
@@ -8,3 +13,27 @@ requests==2.33.1
 # py -3.11 -m venv superset-venv
 # superset-venv\Scripts\python.exe -m pip install apache-superset
 apache-superset
+
+# ============================================================
+# Forecasting & risk stack (Python 3.12 venv: .venv312)
+# ============================================================
+
+# Phase 0 — data engineering
+pyarrow>=15.0
+seaborn>=0.13
+
+# Phase 1 — Demand forecasting
+prophet>=1.1.5
+scikit-learn>=1.4
+# TimesFM (foundation model) — install per timesfm/ README; pulled in optionally
+# timesfm @ file://./timesfm
+
+# Phase 2 — Price elasticity (statsmodels already pinned above is fine)
+linearmodels>=6.0
+pymc>=5.10           # Bayesian hierarchical
+
+# Phase 3 — Risk sub-models
+lightgbm>=4.3
+
+# Phase 5 — Anomaly detection (sklearn covers IsolationForest)
+# (statsmodels covers STL)
