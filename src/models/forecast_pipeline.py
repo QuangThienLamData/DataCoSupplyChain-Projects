@@ -172,31 +172,55 @@ def run_m3() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# M1 demand: per-scenario forecast using M3's drag
+# M1 demand: disaster-aware forecast using SARIMAX (with disaster_index exog)
 # ---------------------------------------------------------------------------
+def _sarimax_forecast_per_product(
+    panel: pd.DataFrame, cohort_a: list,
+    exog_history_by_pid: dict, exog_future_by_pid: dict,
+) -> pd.DataFrame:
+    """Run SARIMAX with disaster_index exog for each product. The exog
+    series MUST be product-specific (different products see different
+    disaster impact via their customer-country mix)."""
+    from src.models.demand.baselines import SARIMAXForecaster, SARIMAForecaster
+    sarimax = SARIMAXForecaster()
+    sarima_fb = SARIMAForecaster()
+    rows = []
+    for pid in cohort_a:
+        hist = panel[(panel["product_card_id"] == pid)
+                      & (panel["year_month"] <= ORIGIN)].sort_values("year_month")
+        y = hist["gross_qty"].fillna(0).to_numpy(dtype=float)
+        ex_hist = exog_history_by_pid.get(pid)
+        ex_fut = exog_future_by_pid.get(pid)
+        if ex_hist is not None and ex_fut is not None:
+            q = sarimax.forecast(y, HORIZON, exog_history=ex_hist, exog_future=ex_fut)
+        else:
+            q = sarima_fb.forecast(y, HORIZON)
+        rows.append(pd.DataFrame({
+            "product_card_id": pid,
+            "year_month": TARGET_MONTHS,
+            "q10": q["q10"], "q50": q["q50"], "q90": q["q90"],
+            "horizon": np.arange(1, HORIZON + 1),
+        }))
+    return pd.concat(rows, ignore_index=True)
+
+
 def run_m1(panel: pd.DataFrame, cohort_a: list, m3_full: pd.DataFrame) -> pd.DataFrame:
-    """Build M1 history + 3-scenario forecast. Returns long-form:
-        product_card_id, year_month, data_type, scenario,
-        q10, q50, q90, actual_gross_qty
-    Each scenario uses recovery_weight = 1 - DAMPING × scenario's drag.
+    """Build M1 history + 3-scenario disaster-aware demand forecast.
+
+    The production demand model in the pipeline is **SARIMAX with
+    disaster_index as exogenous regressor** — the model natively learns
+    how demand responds to storm severity. Each scenario uses its own
+    disaster_index series (from M3) so the demand forecast varies with
+    the storm assumption.
+
+    Schema: product_card_id, year_month, data_type, scenario,
+            q10, q50, q90, actual_gross_qty
     """
-    log.info("===== M1 (demand) — 3 scenarios =====")
-    from src.models.sales.calibrate_damping import load_calibration
-    from src.models.sales.horizon_6mo import (
-        _timesfm_forecast, _seasonal_naive_forecast,
-    )
-
-    _, DISASTER_DAMPING = load_calibration()
-    log.info("using DISASTER_DAMPING=%.3f", DISASTER_DAMPING)
-
-    # Single shared TimesFM + seasonal-naive forecasts (M1 model doesn't
-    # have per-scenario params — scenarios differ only in the blend weight)
-    tfm = _timesfm_forecast(panel, cohort_a, HORIZON)
-    snv = _seasonal_naive_forecast(panel, cohort_a, HORIZON)
+    log.info("===== M1 (demand) — disaster-aware SARIMAX, 3 scenarios =====")
 
     rows_out: list[pd.DataFrame] = []
 
-    # History rows
+    # History rows (actuals — no scenario applies)
     hist = panel[panel["year_month"] <= ORIGIN][
         ["product_card_id", "year_month", "gross_qty"]].copy()
     hist = hist[hist["product_card_id"].isin(cohort_a)]
@@ -209,38 +233,43 @@ def run_m1(panel: pd.DataFrame, cohort_a: list, m3_full: pd.DataFrame) -> pd.Dat
     hist = hist.drop(columns="gross_qty")
     rows_out.append(hist)
 
-    # Forecast rows per scenario
+    # Build exog_history_by_pid (same across scenarios — historical data
+    # is fact; scenarios only diverge for the forecast window).
+    hist_disaster = (m3_full[m3_full["data_type"] == "actual"]
+                       .set_index(["product_card_id", "year_month"])["disaster_index"])
+
+    exog_history_by_pid = {}
+    for pid in cohort_a:
+        try:
+            series = hist_disaster.loc[pid].sort_index().to_numpy(dtype=float)
+            exog_history_by_pid[pid] = series
+        except KeyError:
+            exog_history_by_pid[pid] = None
+
+    # Per-scenario forecasts: each scenario's disaster_index for the
+    # forecast horizon is its own exog future series.
     for scen in SCENARIOS:
-        # Get scenario drag from m3_full
-        scen_drag = (m3_full[(m3_full["data_type"] == "forecast")
-                              & (m3_full["scenario"] == scen)]
-                       [["product_card_id", "year_month", "disaster_drag_index"]])
-        # recovery_weight per (product, month)
-        scen_drag["recovery_weight"] = (
-            1.0 - DISASTER_DAMPING * scen_drag["disaster_drag_index"]).clip(0.0, 1.0)
+        scen_fc = (m3_full[(m3_full["data_type"] == "forecast")
+                            & (m3_full["scenario"] == scen)]
+                     .set_index(["product_card_id", "year_month"])["disaster_index"])
+        exog_future_by_pid = {}
+        for pid in cohort_a:
+            try:
+                series = scen_fc.loc[pid].sort_index().to_numpy(dtype=float)
+                exog_future_by_pid[pid] = series
+            except KeyError:
+                exog_future_by_pid[pid] = None
 
-        # Build M1 forecast: w × seasonal-naive + (1-w) × TimesFM
-        # OR special-case pessimistic = pure TimesFM, optimistic = pure seasonal-naive?
-        # User wants 3 scenarios, all using M3's drag — so we use scenario-specific
-        # weights end-to-end. The kernel choice IS the scenario differentiator.
-        merged_tfm = tfm.set_index(["product_card_id", "year_month"])
-        merged_snv = snv.set_index(["product_card_id", "year_month"])
-        weights = scen_drag.set_index(
-            ["product_card_id", "year_month"])["recovery_weight"]
-
-        idx = merged_snv.index
-        out = merged_snv.copy()
-        for col in ("q10", "q50", "q90"):
-            t = merged_tfm[col].reindex(idx).fillna(0)
-            s = merged_snv[col].fillna(0)
-            w = weights.reindex(idx).fillna(1.0).clip(0.0, 1.0)
-            out[col] = w * s + (1 - w) * t
-        out = out.reset_index()[["product_card_id", "year_month",
-                                   "q10", "q50", "q90"]]
-        out["data_type"] = "forecast"
-        out["scenario"] = scen
-        out["actual_gross_qty"] = np.nan
-        rows_out.append(out)
+        log.info("  scenario=%s: running SARIMAX over %d products",
+                 scen, len(cohort_a))
+        fc = _sarimax_forecast_per_product(
+            panel, cohort_a, exog_history_by_pid, exog_future_by_pid)
+        fc["data_type"] = "forecast"
+        fc["scenario"] = scen
+        fc["actual_gross_qty"] = np.nan
+        rows_out.append(fc[["product_card_id", "year_month", "data_type",
+                              "scenario", "q10", "q50", "q90",
+                              "actual_gross_qty"]])
 
     m1_full = pd.concat(rows_out, ignore_index=True)
     m1_full = m1_full[["product_card_id", "year_month", "data_type", "scenario",

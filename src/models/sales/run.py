@@ -158,19 +158,17 @@ def run() -> None:
             scn_df["slice"] = name
             all_scen.append(scn_df)
 
-        # Backtest three views against their respective targets:
-        # - sales_q50_pre_risk  vs gross_revenue   (M1 + M2 accuracy)
-        # - sales_q50_historical vs revenue_realized (M1 + M2 + observable risk)
-        # - sales_q50 (forward) — informational gap vs revenue_realized
+        # Backtest two views against their respective targets:
+        # - sales_q50_pre_risk  vs gross_revenue       (M1 + M2 ceiling)
+        # - sales_q50 (forward-risk-adj) vs revenue_realized (operating view)
         actuals = panel[(panel["data_quality"] == "ok")][
             ["product_card_id", "year_month",
              "qty", "gross_qty", "p_eff",
              "revenue_realized", "gross_revenue"]
         ]
         bt = fc_base.merge(actuals, on=["product_card_id", "year_month"], how="left")
-        bt["err_gross"]     = bt["gross_revenue"]    - bt["sales_q50_pre_risk"]
-        bt["err_realized"]  = bt["revenue_realized"] - bt["sales_q50_historical"]
-        bt["err_forward"]   = bt["revenue_realized"] - bt["sales_q50"]
+        bt["err_gross"]   = bt["gross_revenue"]    - bt["sales_q50_pre_risk"]
+        bt["err_forward"] = bt["revenue_realized"] - bt["sales_q50"]
         backtest_rows.append(bt)
 
         # Error decomposition (linearised):
@@ -191,7 +189,6 @@ def run() -> None:
             "forecast_pre_risk_q50": bt2["sales_q50_pre_risk"],
             "forecast_risk_adj_q50": bt2["sales_q50"],
             "err_gross": bt2["err_gross"],
-            "err_realized": bt2["err_realized"],
             "err_forward": bt2["err_forward"],
             "delta_demand_qty": delta_demand,
             "delta_price": delta_price,
@@ -208,10 +205,6 @@ def run() -> None:
                  name,
                  _wape(bt["gross_revenue"], bt["sales_q50_pre_risk"]),
                  _coverage(bt["gross_revenue"], bt["sales_q10_pre_risk"], bt["sales_q90_pre_risk"]))
-        log.info("  %s historical  vs revenue_realized : WAPE=%.4f cov80=%.4f",
-                 name,
-                 _wape(bt["revenue_realized"], bt["sales_q50_historical"]),
-                 _coverage(bt["revenue_realized"], bt["sales_q10_historical"], bt["sales_q90_historical"]))
         log.info("  %s forward-adj vs revenue_realized : WAPE=%.4f cov80=%.4f",
                  name,
                  _wape(bt["revenue_realized"], bt["sales_q50"]),
@@ -274,17 +267,13 @@ def run() -> None:
         print(f"  {slc:4s}: Tier-1 historical={wh:.4f}  Tier-2+3 forward={wf:.4f}  "
               f"delta={wh-wf:+.4f}  ({(wh-wf)/max(wh,1e-9):+.1%})")
 
-    # Portfolio headlines — three views.
+    # Portfolio headlines — two views.
     bt_all = pd.concat(backtest_rows, ignore_index=True)
-    print("\n===== M4 PRE-RISK vs GROSS_REVENUE (sanity check: M1 + price) =====")
+    print("\n===== M4 PRE-RISK vs GROSS_REVENUE (M1 + M2 ceiling) =====")
     for slc, sub in bt_all.groupby("slice"):
         print(f"  {slc:4s}: WAPE={_wape(sub['gross_revenue'], sub['sales_q50_pre_risk']):.4f}  "
               f"cov80={_coverage(sub['gross_revenue'], sub['sales_q10_pre_risk'], sub['sales_q90_pre_risk']):.4f}")
-    print("\n===== M4 HISTORICAL-RISK vs REVENUE_REALIZED (M1+M2+observable risk) =====")
-    for slc, sub in bt_all.groupby("slice"):
-        print(f"  {slc:4s}: WAPE={_wape(sub['revenue_realized'], sub['sales_q50_historical']):.4f}  "
-              f"cov80={_coverage(sub['revenue_realized'], sub['sales_q10_historical'], sub['sales_q90_historical']):.4f}")
-    print("\n===== M4 FORWARD-RISK-ADJ vs REVENUE_REALIZED (informational; extra drag = forward) =====")
+    print("\n===== M4 FORWARD-RISK-ADJ vs REVENUE_REALIZED (operating view) =====")
     for slc, sub in bt_all.groupby("slice"):
         print(f"  {slc:4s}: WAPE={_wape(sub['revenue_realized'], sub['sales_q50']):.4f}  "
               f"cov80={_coverage(sub['revenue_realized'], sub['sales_q10'], sub['sales_q90']):.4f}  "

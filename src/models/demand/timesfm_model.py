@@ -127,6 +127,39 @@ class TimesFMForecaster:
         return out
 
 
+def forecast_panel_timesfm_daily(
+    panel,
+    model: TimesFMForecaster,
+    origin,
+    horizon: int,
+    product_ids: list,
+):
+    """Daily-frequency analogue: reads `date` + `gross_qty` instead of
+    `year_month` + `qty`. Returns long frame with `date` index.
+    """
+    import pandas as pd
+    origin = pd.Timestamp(origin)
+    fc_dates = pd.date_range(origin + pd.Timedelta(days=1), periods=horizon, freq="D")
+
+    histories: list[np.ndarray] = []
+    for pid in product_ids:
+        hist = panel[(panel["product_card_id"] == pid)
+                      & (panel["date"] <= origin)].sort_values("date")
+        histories.append(hist["gross_qty"].fillna(0).to_numpy(dtype=float))
+
+    quantiles = model.forecast_batch(histories, horizon)
+    frames = []
+    for pid, q in zip(product_ids, quantiles):
+        frames.append(pd.DataFrame({
+            "product_card_id": pid,
+            "date": fc_dates,
+            "horizon": np.arange(1, horizon + 1),
+            "q10": q["q10"], "q50": q["q50"], "q90": q["q90"],
+            "model": model.name,
+        }))
+    return pd.concat(frames, ignore_index=True)
+
+
 def forecast_panel_timesfm(
     panel,
     model: TimesFMForecaster,

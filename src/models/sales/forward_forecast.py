@@ -384,5 +384,5 @@ if __name__ == "__main__":
                                           ascending=False).head(10)
     print(cmp[["product_card_id", "year_month",
                 "disaster_index_historical", "forward_disaster_index",
-                "sales_q50", "sales_q50_historical", "sales_q50_pre_risk"]]
+                "sales_q50", "sales_q50_pre_risk"]]
             .round(3).to_string(index=False))

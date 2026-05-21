@@ -174,12 +174,6 @@ def montecarlo_sales(
 
     # Full 4-component risk_drag — M1 forecasts gross demand, so fraud +
     # cancel + late + disaster all apply (no double-counting).
-    #
-    # We split the drag into two layers because only fraud + cancel are
-    # observable in history (they map to order_status):
-    #   - drag_historical = fraud + cancel    (validatable against revenue_realized)
-    #   - drag_forward    = late + disaster   (hypothetical — no refund / disaster
-    #                                          ledger in this dataset)
     p_fraud = _sample_risk_component(inp.p_fraud, n_samples, risk_concentration, rng)
     p_cancel = _sample_risk_component(inp.p_cancel, n_samples, risk_concentration, rng)
     p_late = _sample_risk_component(inp.p_late, n_samples, risk_concentration, rng)
@@ -188,38 +182,32 @@ def montecarlo_sales(
     # continue to show the raw `disaster_index` separately.
     di = np.clip(inp.disaster_drag_index, 0.0, 1.0)
 
-    drag_historical = 1 - (1 - p_fraud) * (1 - p_cancel)
-    drag_forward    = 1 - (1 - LATE_DAMPING * p_late) * (1 - DISASTER_DAMPING * di)
-    risk_drag       = 1 - (1 - drag_historical) * (1 - drag_forward)
+    risk_drag = 1 - (
+        (1 - p_fraud) * (1 - p_cancel) *
+        (1 - LATE_DAMPING * p_late) *
+        (1 - DISASTER_DAMPING * di)
+    )
 
-    # Three views:
+    # Two output views:
     #  - pre-risk           : gross expected sales (vs gross_revenue)
-    #  - historical-risk    : after fraud + cancel (vs revenue_realized)
-    #  - forward-risk-adj   : after all four risks (planning number; not backtestable)
+    #  - forward-risk-adj   : after all four risks (operating forecast)
     sales_pre_risk = np.maximum(qty_adj * planned_price, 0.0)
-    sales_historical_risk = np.maximum(sales_pre_risk * (1 - drag_historical), 0.0)
     sales = np.maximum(sales_pre_risk * (1 - risk_drag), 0.0)
 
     return {
-        # Forward risk-adjusted (planning view; used in scenarios)
+        # Forward risk-adjusted (operating view; default)
         "sales_q10": float(np.quantile(sales, 0.10)),
         "sales_q50": float(np.quantile(sales, 0.50)),
         "sales_q90": float(np.quantile(sales, 0.90)),
         "sales_mean": float(sales.mean()),
         "sales_std": float(sales.std()),
-        # Pre-risk (backtestable against gross_revenue)
+        # Pre-risk (backtest against gross_revenue; M1+M2 ceiling)
         "sales_q10_pre_risk": float(np.quantile(sales_pre_risk, 0.10)),
         "sales_q50_pre_risk": float(np.quantile(sales_pre_risk, 0.50)),
         "sales_q90_pre_risk": float(np.quantile(sales_pre_risk, 0.90)),
-        # Historical-risk (backtestable against revenue_realized)
-        "sales_q10_historical": float(np.quantile(sales_historical_risk, 0.10)),
-        "sales_q50_historical": float(np.quantile(sales_historical_risk, 0.50)),
-        "sales_q90_historical": float(np.quantile(sales_historical_risk, 0.90)),
         # Components for decomposition
         "qty_q50_adj": float(np.quantile(qty_adj, 0.50)),
         "risk_drag_q50": float(np.quantile(risk_drag, 0.50)),
-        "drag_historical_q50": float(np.quantile(drag_historical, 0.50)),
-        "drag_forward_q50": float(np.quantile(drag_forward, 0.50)),
         "elasticity_term_q50": float(np.quantile(elasticity_term, 0.50)),
     }
 

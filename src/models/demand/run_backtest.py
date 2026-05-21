@@ -32,6 +32,7 @@ from src.models.demand.baselines import (
     ETSForecaster,
     ProphetForecaster,
     SARIMAForecaster,
+    SARIMAXForecaster,
     SeasonalNaiveForecaster,
     forecast_panel_baseline,
 )
@@ -152,7 +153,18 @@ def run() -> None:
     ets = ETSForecaster()
     prophet = ProphetForecaster(interval_width=0.8)
     sarima = SARIMAForecaster()
+    sarimax = SARIMAXForecaster()
     tfm = TimesFMForecaster(max_context=24, max_horizon=7)
+
+    # Disaster-index exog panel for SARIMAX (covers history + future months
+    # in the test window, so SARIMAX can use disaster_index as a regressor).
+    try:
+        risk_drag = pd.read_parquet(ROOT / "forecasts" / "m3_risk_drag.parquet")
+        exog_panel = risk_drag[["product_card_id", "year_month", "disaster_index"]].copy()
+        log.info("loaded disaster_index exog panel: %d rows", len(exog_panel))
+    except FileNotFoundError:
+        exog_panel = None
+        log.info("no m3_risk_drag.parquet found — SARIMAX will fall back to SARIMA")
 
     all_forecasts: list[pd.DataFrame] = []
     metric_rows: list[pd.DataFrame] = []
@@ -168,11 +180,12 @@ def run() -> None:
         # 7-month test horizon and was the weakest baseline (val WAPE 0.21
         # vs 0.12 for TimesFM). To re-enable, uncomment the line below.
         baselines = [
-            (forecast_panel_baseline(panel, snaive, origin, horizon, product_ids=cohort_a),  "seasonal_naive"),
-            (forecast_panel_baseline(panel, ets,    origin, horizon, product_ids=cohort_a),  "ets"),
-            (forecast_panel_baseline(panel, sarima, origin, horizon, product_ids=cohort_a),  "sarima"),
-            # (forecast_panel_baseline(panel, prophet,origin, horizon, product_ids=cohort_a),  "prophet"),
-            (forecast_panel_timesfm(panel, tfm,     origin, horizon, product_ids=cohort_a),  "timesfm"),
+            (forecast_panel_baseline(panel, snaive,  origin, horizon, product_ids=cohort_a),  "seasonal_naive"),
+            (forecast_panel_baseline(panel, ets,     origin, horizon, product_ids=cohort_a),  "ets"),
+            (forecast_panel_baseline(panel, sarima,  origin, horizon, product_ids=cohort_a),  "sarima"),
+            (forecast_panel_baseline(panel, sarimax, origin, horizon, product_ids=cohort_a,
+                                       exog_panel=exog_panel, exog_col="disaster_index"),     "sarimax"),
+            (forecast_panel_timesfm(panel, tfm,      origin, horizon, product_ids=cohort_a),  "timesfm"),
         ]
         for fc, name in baselines:
             forecasts_a[name] = fc

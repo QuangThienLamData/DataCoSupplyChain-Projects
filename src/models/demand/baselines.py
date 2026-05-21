@@ -216,6 +216,95 @@ class SARIMAForecaster:
 
 
 # ---------------------------------------------------------------------------
+# SARIMAX — SARIMA with exogenous regressor (disaster-aware demand model)
+# ---------------------------------------------------------------------------
+#
+# This is the **disaster-aware** demand model. Unlike univariate SARIMA,
+# SARIMAX takes `disaster_index` as an exogenous time series — the model
+# learns how demand responds to storm severity (typically a negative
+# coefficient: high disaster → lower demand). The same exog series must
+# be provided for the forecast horizon (typically the M3 forward
+# disaster_index).
+#
+# Order search uses the same identifiable-order list as SARIMA. Falls
+# back to univariate SARIMA if exog fit fails.
+@dataclass
+class SARIMAXForecaster:
+    seasonality: int = SEASONAL_LAG
+    name: str = "sarimax"
+    candidate_orders: tuple[tuple, ...] = (
+        (0, 1, 1, 0, 1, 0),
+        (1, 1, 0, 0, 1, 0),
+        (1, 1, 1, 0, 1, 0),
+        (0, 1, 1, 1, 0, 0),
+        (0, 1, 1, 0, 0, 1),
+        (1, 1, 0, 1, 0, 0),
+        (1, 1, 1, 1, 0, 0),
+        (0, 1, 0, 0, 1, 0),
+    )
+
+    def _fit_best(self, h: np.ndarray, exog: np.ndarray):
+        """Fit SARIMAX with exog; return lowest-AICc fit."""
+        from statsmodels.tsa.statespace.sarimax import SARIMAX
+        best = None
+        for (p, d, q, P, D, Q) in self.candidate_orders:
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    res = SARIMAX(
+                        h, exog=exog,
+                        order=(p, d, q),
+                        seasonal_order=(P, D, Q, self.seasonality),
+                        enforce_stationarity=False,
+                        enforce_invertibility=False,
+                    ).fit(disp=False, method="lbfgs", maxiter=100)
+                aicc = float(res.aicc)
+                if not np.isfinite(aicc):
+                    continue
+                if best is None or aicc < best[0]:
+                    best = (aicc, res, (p, d, q, P, D, Q))
+            except Exception:
+                continue
+        return best
+
+    def forecast(self, history: np.ndarray, horizon: int,
+                  exog_history: np.ndarray | None = None,
+                  exog_future: np.ndarray | None = None) -> dict[str, np.ndarray]:
+        """SARIMAX with disaster_index (or any 1-D exog) as exogenous regressor.
+
+        `exog_history` aligns with `history` (same length). `exog_future`
+        provides the exog values over the forecast horizon. If either is
+        missing, falls back to univariate SARIMA.
+        """
+        h = np.nan_to_num(np.asarray(history, dtype=float), nan=0.0)
+        if exog_history is None or exog_future is None:
+            return SARIMAForecaster(self.seasonality).forecast(history, horizon)
+        eh = np.nan_to_num(np.asarray(exog_history, dtype=float), nan=0.0).reshape(-1, 1)
+        ef = np.nan_to_num(np.asarray(exog_future, dtype=float), nan=0.0).reshape(-1, 1)
+        if len(h) < 2 * self.seasonality or len(eh) != len(h) or len(ef) < horizon:
+            return SARIMAForecaster(self.seasonality).forecast(history, horizon)
+
+        best = self._fit_best(h, eh)
+        if best is None:
+            return SARIMAForecaster(self.seasonality).forecast(history, horizon)
+        _aicc, res, _order = best
+
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                fc = res.get_forecast(steps=horizon, exog=ef[:horizon])
+                mean = np.asarray(fc.predicted_mean, dtype=float)
+                ci = fc.conf_int(alpha=0.2)
+                ci_arr = ci.to_numpy() if hasattr(ci, "to_numpy") else np.asarray(ci)
+                ci10 = ci_arr[:, 0].astype(float)
+                ci90 = ci_arr[:, 1].astype(float)
+        except Exception:
+            return SARIMAForecaster(self.seasonality).forecast(history, horizon)
+
+        return _post(ci10, mean, ci90)
+
+
+# ---------------------------------------------------------------------------
 # Prophet
 # ---------------------------------------------------------------------------
 @dataclass
@@ -266,10 +355,17 @@ def forecast_panel_baseline(
     origin: pd.Timestamp,
     horizon: int,
     product_ids: list | None = None,
+    exog_panel: pd.DataFrame | None = None,
+    exog_col: str = "disaster_index",
 ) -> pd.DataFrame:
-    """Generate forecasts for every product (or `product_ids` subset) given
-    history through `origin` (inclusive). Returns long-format frame:
-        product_card_id, year_month, horizon (1..H), q10, q50, q90, model
+    """Generate forecasts for every product given history through `origin`.
+
+    If `forecaster` is a SARIMAXForecaster and `exog_panel` is provided
+    (with columns product_card_id, year_month, <exog_col>), the exog
+    series for each product is passed through to SARIMAX. The exog values
+    for the forecast horizon must also be present in `exog_panel`.
+
+    Returns long-format: product_card_id, year_month, horizon, q10, q50, q90, model.
     """
     clean = panel[panel["data_quality"] == "ok"].copy()
     months = pd.to_datetime(sorted(clean["year_month"].unique()))
@@ -285,6 +381,7 @@ def forecast_panel_baseline(
     forecast_months = months[origin_idx + 1: origin_idx + 1 + horizon]
 
     pids = product_ids if product_ids is not None else sorted(clean["product_card_id"].unique())
+    is_sarimax = forecaster.__class__.__name__ == "SARIMAXForecaster"
     out_rows: list[pd.DataFrame] = []
     for pid in pids:
         hist = clean[(clean["product_card_id"] == pid) & (clean["year_month"] <= origin)]
@@ -292,6 +389,12 @@ def forecast_panel_baseline(
         if isinstance(forecaster, ProphetForecaster):
             q = forecaster.forecast(hist[["year_month", "qty"]].rename(
                 columns={"year_month": "ds", "qty": "y"}), horizon)
+        elif is_sarimax and exog_panel is not None:
+            ex_p = exog_panel[exog_panel["product_card_id"] == pid].sort_values("year_month")
+            ex_hist = ex_p[ex_p["year_month"] <= origin][exog_col].to_numpy()
+            ex_fut = ex_p[ex_p["year_month"].isin(forecast_months)][exog_col].to_numpy()
+            q = forecaster.forecast(hist["qty"].to_numpy(), horizon,
+                                      exog_history=ex_hist, exog_future=ex_fut)
         else:
             q = forecaster.forecast(hist["qty"].to_numpy(), horizon)
         out_rows.append(pd.DataFrame({
