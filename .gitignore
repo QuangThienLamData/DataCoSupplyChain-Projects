@@ -1,0 +1,32 @@
+# Virtual environments
+.scmvenv/
+superset-venv/
+.venv*/
+venv/
+.claude/
+
+# Large data files (download via data_download.py or Kaggle)
+data/DataCoSupplyChainDataset.csv
+data/tokenized_access_logs.csv
+data/dataco.db
+
+# Third-party library (TimesFM — install via pip)
+timesfm/
+
+# Raw HURDAT2 text dumps (re-download via src/data/hurdat2_ingest.py)
+data/raw/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
