@@ -34,7 +34,6 @@ log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
 PANEL_PATH = ROOT / "data" / "processed" / "daily_panel.parquet"
-META_PATH = ROOT / "data" / "processed" / "daily_panel_meta.parquet"
 FC_DIR = ROOT / "forecasts"
 
 AS_OF = pd.Timestamp("2018-01-31")
@@ -135,7 +134,7 @@ def run_m3() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # M1 daily — pre-storm TimesFM context + multiplicative recovery damping
 # ---------------------------------------------------------------------------
-def run_m1(panel: pd.DataFrame, cohort_a: list, m3_daily: pd.DataFrame) -> pd.DataFrame:
+def run_m1(panel: pd.DataFrame, product_ids: list, m3_daily: pd.DataFrame) -> pd.DataFrame:
     """Daily M1 forecast using **pre-storm TimesFM context** + multiplicative
     recovery damping.
 
@@ -173,7 +172,7 @@ def run_m1(panel: pd.DataFrame, cohort_a: list, m3_daily: pd.DataFrame) -> pd.Da
     # History rows (actuals — scenario=None)
     hist = panel[panel["date"] <= ORIGIN][
         ["product_card_id", "date", "gross_qty"]].copy()
-    hist = hist[hist["product_card_id"].isin(cohort_a)]
+    hist = hist[hist["product_card_id"].isin(product_ids)]
     hist["data_type"] = "actual"
     hist["scenario"] = None
     hist["q10"] = np.nan
@@ -184,7 +183,7 @@ def run_m1(panel: pd.DataFrame, cohort_a: list, m3_daily: pd.DataFrame) -> pd.Da
     rows.append(hist)
 
     # Per-product historical storm exposure (used by the multiplicative damp)
-    hist_strength = _historical_recovery_strength(m3_daily, cohort_a)
+    hist_strength = _historical_recovery_strength(m3_daily, product_ids)
     log.info("historical recovery strength (1 - mean disaster_index over %s..%s): "
              "mean=%.3f, min=%.3f, max=%.3f",
              HIST_EXPOSURE_WINDOW[0].date(), HIST_EXPOSURE_WINDOW[1].date(),
@@ -197,7 +196,7 @@ def run_m1(panel: pd.DataFrame, cohort_a: list, m3_daily: pd.DataFrame) -> pd.Da
     log.info("TimesFM batched: pre-storm origin=%s, horizon=%d (compiled=%d)",
              PRE_STORM_ORIGIN.date(), PRE_STORM_HORIZON, tfm_max_horizon)
     tfm_fc = forecast_panel_timesfm_daily(
-        panel, tfm, PRE_STORM_ORIGIN, PRE_STORM_HORIZON, cohort_a)
+        panel, tfm, PRE_STORM_ORIGIN, PRE_STORM_HORIZON, product_ids)
     # Keep only the target Feb-Jul 2018 window
     tfm_fc = tfm_fc[tfm_fc["date"].isin(TARGET_DATES)].copy()
     log.info("sliced to TARGET_DATES (%s..%s): %d rows",
@@ -213,7 +212,7 @@ def run_m1(panel: pd.DataFrame, cohort_a: list, m3_daily: pd.DataFrame) -> pd.Da
                    .set_index(["product_card_id", "date"])["disaster_drag_index"])
 
     damped_rows = []
-    for pid in cohort_a:
+    for pid in product_ids:
         sub = tfm_fc[tfm_fc["product_card_id"] == pid].sort_values("date").copy()
         try:
             drag = scen_drag.loc[pid].reindex(sub["date"]).fillna(0).to_numpy(dtype=float)
@@ -283,7 +282,7 @@ def run_m2() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # M4 daily MC
 # ---------------------------------------------------------------------------
-def run_m4(panel: pd.DataFrame, cohort_a: list,
+def run_m4(panel: pd.DataFrame, product_ids: list,
             m1_full: pd.DataFrame, m3_daily: pd.DataFrame) -> pd.DataFrame:
     log.info("===== M4 daily — Monte Carlo per (product, date), 3 scenarios =====")
     from src.models.sales.run_daily import baseline_price_daily, montecarlo_daily
@@ -293,7 +292,7 @@ def run_m4(panel: pd.DataFrame, cohort_a: list,
     # History rows (actual revenue_realized)
     hist = panel[panel["date"] <= ORIGIN][
         ["product_card_id", "date", "revenue_realized"]].copy()
-    hist = hist[hist["product_card_id"].isin(cohort_a)]
+    hist = hist[hist["product_card_id"].isin(product_ids)]
     hist["data_type"] = "actual"
     hist["scenario"] = None
     hist["q10"] = np.nan
@@ -358,15 +357,14 @@ def run():
     log.info("===== DAILY PIPELINE — as-of %s, horizon %d days =====",
              AS_OF.date(), HORIZON_DAYS)
     panel = pd.read_parquet(PANEL_PATH)
-    meta = pd.read_parquet(META_PATH)
-    cohort_a = meta.loc[meta["cohort"] == "A_active", "product_card_id"].tolist()
-    log.info("cohort A: %d products", len(cohort_a))
+    product_ids = sorted(panel["product_card_id"].unique().tolist())
+    log.info("forecasting all products: %d", len(product_ids))
 
     m3 = run_m3()
     m3.to_parquet(FC_DIR / "m3_pipeline_daily.parquet", index=False)
     log.info("wrote m3_pipeline_daily.parquet (%d rows)", len(m3))
 
-    m1 = run_m1(panel, cohort_a, m3)
+    m1 = run_m1(panel, product_ids, m3)
     m1.to_parquet(FC_DIR / "m1_pipeline_daily.parquet", index=False)
     log.info("wrote m1_pipeline_daily.parquet (%d rows)", len(m1))
 
@@ -374,7 +372,7 @@ def run():
     m2.to_parquet(FC_DIR / "m2_pipeline_daily.parquet", index=False)
     log.info("wrote m2_pipeline_daily.parquet (%d rows)", len(m2))
 
-    m4 = run_m4(panel, cohort_a, m1, m3)
+    m4 = run_m4(panel, product_ids, m1, m3)
     m4.to_parquet(FC_DIR / "m4_pipeline_daily.parquet", index=False)
     log.info("wrote m4_pipeline_daily.parquet (%d rows)", len(m4))
 
