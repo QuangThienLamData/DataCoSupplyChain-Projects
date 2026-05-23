@@ -133,8 +133,9 @@ def forecast_panel_timesfm_daily(
     origin,
     horizon: int,
     product_ids: list,
+    value_col: str = "gross_qty",
 ):
-    """Daily-frequency analogue: reads `date` + `gross_qty` instead of
+    """Daily-frequency analogue: reads `date` + `value_col` instead of
     `year_month` + `qty`. Returns long frame with `date` index.
     """
     import pandas as pd
@@ -145,7 +146,7 @@ def forecast_panel_timesfm_daily(
     for pid in product_ids:
         hist = panel[(panel["product_card_id"] == pid)
                       & (panel["date"] <= origin)].sort_values("date")
-        histories.append(hist["gross_qty"].fillna(0).to_numpy(dtype=float))
+        histories.append(hist[value_col].fillna(0).to_numpy(dtype=float))
 
     quantiles = model.forecast_batch(histories, horizon)
     frames = []
