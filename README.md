@@ -134,7 +134,7 @@ The combination of high fraud incidence and high loss-making rate in the same ca
 | 4 | Pet Shop fraud rate 3× average in Pacific Asia (Corporate) | Critical | Immediate review of Corporate Pet Shop orders in Pacific Asia |
 | 5 | Health & Beauty: 20% fraud + 33% loss rate in Pacific Asia | Critical | Tighten controls; suspend high-risk transaction patterns |
 
-## What-if Analysis
+## What-if Analysis (~/notebooks/discount_elasticity.ipynb)
 ### Discount → AOV & Quantity Elasticity
 
 **Question.** When we offer a discount, how do AOV and quantity per order change?
