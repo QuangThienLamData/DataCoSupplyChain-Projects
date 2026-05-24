@@ -134,6 +134,67 @@ The combination of high fraud incidence and high loss-making rate in the same ca
 | 4 | Pet Shop fraud rate 3× average in Pacific Asia (Corporate) | Critical | Immediate review of Corporate Pet Shop orders in Pacific Asia |
 | 5 | Health & Beauty: 20% fraud + 33% loss rate in Pacific Asia | Critical | Tighten controls; suspend high-risk transaction patterns |
 
+## What-if Analysis
+### Discount → AOV & Quantity Elasticity
+
+**Question.** When we offer a discount, how do AOV and quantity per order change?
+
+See `notebooks/discount_elasticity.ipynb` for the full code.
+
+#### Why the relationship is non-linear (formal proof)
+
+Two specifications, both with **within-product fixed effects** and HC3 robust SE:
+
+| Spec | β on `disc` | β on `disc²` | R² |
+|---|---|---|---|
+| **Linear** | −0.08 (p = 0.16) | — | **0.0000** |
+| **Quadratic** | +12.75 (p < 1e−200) | **−58.32 (p < 1e−200)** | **0.094** |
+
+The quadratic term's p-value (≈ 0) is the formal test: **the linear spec is decisively rejected**. R² jumps from ~0 to 0.094 — a ~300× improvement.
+
+Visually, the bin means trace an inverted-U; the linear fit is a flat line through the data, the quadratic curve goes right through the bin means.
+
+#### The non-linear formula
+
+Within-product fixed effects, with `d` = discount rate in [0, 1]:
+
+```
+log( AOV(d) / AOV(0) )  =  +12.75 · d  −  58.32 · d²
+log( qty(d) / qty(0) )  =  +13.36 · d  −  60.79 · d²
+```
+
+Equivalently:
+
+```
+AOV(d)  =  AOV(0) · exp( 12.75 · d  −  58.32 · d² )
+qty(d)  =  qty(0) · exp( 13.36 · d  −  60.79 · d² )
+```
+
+**Peak** at  `d* = −β₁ / (2β₂) ≈ 11%` discount for both AOV and qty.
+
+#### Predicted % change vs no-discount baseline
+
+| Discount | AOV | Qty/order |
+|---|---|---|
+| 2% | +26% | +28% |
+| 5% | +63% | +67% |
+| **11% (peak)** | **+101%** | **+108%** |
+| 15% | +82% | +89% |
+| 20% | +24% | +27% |
+| 25% | −37% | −37% |
+| 30% | −76% | −77% |
+
+#### Interpretation
+
+- Discount acts on **basket composition** — no-discount orders avg 1.03 line items; 11–15% discount orders avg 3.1 line items.
+- **Sweet spot: 10–15%** — doubles AOV and qty/order. Beyond 20%, returns collapse; 25%+ likely flags clearance/distressed inventory.
+- The earlier *linear-continuous* regression β ≈ 0 was a **mis-specification**; a linear slope through an inverted-U averages to ~zero.
+
+#### Caveat
+
+Quadratic R² ≈ 9%. Most order-size variation is product mix / occasion, not discount. Use these betas for **directional pricing decisions**, not tight revenue predictions.
+
+
 ## Dashboard Building
 ### Overall
 <img width="1168" height="670" alt="image" src="https://github.com/user-attachments/assets/7de5eb0c-e501-4551-b524-c07c64f37c04" />
