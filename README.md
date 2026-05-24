@@ -84,7 +84,7 @@ The only category sustaining meaningful demand was **Electronic Devices**. While
 
 Analysis of discount depth against profit margin and order value reveals a clear sweet spot.
 
-![Discount analysis chart](https://github.com/user-attachments/assets/356c61d1-b58b-44d9-9636-b194d85edeeb)
+<img width="753" height="232" alt="image" src="https://github.com/user-attachments/assets/176fd76b-fad5-4b5c-b5d5-29f6e164961e" />
 
 Discounts in the **1–10% range** consistently achieve the best trade-off: they are sufficient to encourage customers to increase their order value, while preserving an acceptable profit margin. Discounts beyond this threshold provide diminishing returns — order values do not increase proportionally, and margin erosion accelerates.
 
