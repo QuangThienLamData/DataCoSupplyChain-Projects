@@ -190,44 +190,104 @@ qty(d)  =  qty(0) · exp( 13.36 · d  −  60.79 · d² )
 - **Sweet spot: 10–15%** — doubles AOV and qty/order. Beyond 20%, returns collapse; 25%+ likely flags clearance/distressed inventory.
 - The earlier *linear-continuous* regression β ≈ 0 was a **mis-specification**; a linear slope through an inverted-U averages to ~zero.
 
-#### Caveat
-
-Quadratic R² ≈ 9%. Most order-size variation is product mix / occasion, not discount. Use these betas for **directional pricing decisions**, not tight revenue predictions.
 
 ### What-if analysis by discount scenarios
-#### What-if table (orders held constant, baseline margin 12%)
+#### Number-of-orders elasticity
 
-| Discount | %ΔAOV | %ΔSales | New margin | %ΔProfit |
-|---|---|---|---|---|
-| 0% | 0% | 0% | +12.0% | 0% |
-| 2% | +26% | +26% | +10.2% | **+7%** |
-| **2.6%** | **+33%** | **+33%** | **+9.7%** | **+8%** ← profit max |
-| 5% | +63% | +63% | +7.4% | 0% |
-| 8% | +91% | +91% | +4.3% | −31% |
-| **11%** | **+101%** | **+101%** | +1.1% | −81% ← sales max |
-| 12% | +99% | +99% | 0.0% | **−100%** (margin gone) |
-| 15% | +82% | +82% | −3.5% | −154% (losing money on each sale) |
-| 20% | +24% | +24% | −10.0% | −204% |
+From the monthly panel, within-product FE: `log(num_orders) ~ log(price)`
 
-## Optimal discount
+```
+β_orders = −0.469   (p = 0.22)
+```
+
+So `num_orders(d) = num_orders(0) × (1 − d)^(−0.47)`.
+
+A 10% discount → +5.1% more orders.
+
+---
+### Hybrid what-if formula
+
+#### Calculating new Profit Margin
+Let:
+  - P = list price (per unit)
+  - C = COGS per unit (unchanged by the discount — key assumption)
+  - m₀ = baseline gross margin (when d = 0) → from your dashboard, 12%
+
+  Baseline accounting:
+  profit₀  =  P − C
+  m₀       =  (P − C) / P
+  ⟹  C    =  P × (1 − m₀)
+
+  Apply the discount
+
+  New selling price: P × (1 − d)
+
+  COGS doesn't change (you still pay your supplier the same amount), so:
+
+  new_profit  =  P(1 − d)  −  C
+              =  P(1 − d)  −  P(1 − m₀)
+              =  P × (m₀ − d)
+
+  New margin = new profit / new revenue:
+
+  margin(d)  =  P(m₀ − d) / [P(1 − d)]
+             =  (m₀ − d) / (1 − d)
+
+#### Sale change formula
+
+Combining the two — orders elasticity drives **how many** customers, quadratic drives **how big** each basket:
+
+```
+Sales(d) / Sales(0)  =  (1 − d)^(−0.47)  ×  exp( 12.75·d − 58.32·d² )
+                       └──── orders ────┘  └────── AOV per order ──────┘
+```
+
+Profit (with COGS unchanged, baseline gross margin m₀ = 12%):
+
+```
+margin(d)  =  (m₀ − d) / (1 − d)
+Profit(d) / Profit(0)  =  Sales(d)/Sales(0)  ×  margin(d) / m₀
+```
+
+#### What-if table
+
+| Discount | %Δorders | %ΔAOV | **%ΔSales** | New margin | **%ΔProfit** |
+|---|---|---|---|---|---|
+| 0% | 0% | 0% | 0% | +12.0% | 0% |
+| 2% | +0.95% | +26% | +27% | +10.2% | **+8%** |
+| **2.86%** ← profit max | **+1.4%** | **+37%** | **+39%** | **+9.4%** | **+9%** |
+| 5% | +2.4% | +63% | +67% | +7.4% | +3% |
+| **5.4%** ← profit breakeven | +2.6% | +69% | +73% | +7.0% | 0% |
+| 8% | +4.0% | +91% | +99% | +4.3% | −28% |
+| 10% | +5.1% | +100% | +110% | +2.2% | −61% |
+| **11.4%** ← sales max | **+5.9%** | **+101%** | **+113%** | **+0.7%** | **−87%** |
+| 12% | +6.2% | +100% | +112% | 0.0% | −100% (margin gone) |
+| 15% | +7.9% | +82% | +97% | −3.5% | −158% |
+| 20% | +11.0% | +24% | +38% | −10.0% | −215% |
+
+#### Conclusion
 
 | Goal | Optimal discount | Result |
 |---|---|---|
-| **Maximise sales** | ~11% | Sales 2.0× baseline (profit dies) |
-| **Maximise profit** | ~2.6% | Sales +33%, profit +8% |
-| **Breakeven margin** | 12% | Beyond this every order loses money |
+| **Maximise sales** | **~11.4%** | Sales 2.12× baseline (profit −87%) |
+| **Maximise profit** | **~2.9%** | Sales +39%, profit **+9%** |
+| **Profit-breakeven vs baseline** | **~5.4%** | Beyond this, profit drops below baseline |
+| **Margin breakeven** | **12.0%** | Beyond this, every order loses money |
 
-#### Sensitivity — what if discount also brings more orders?
+**Two key thresholds:**
 
-Add `num_orders(d) = num_orders(0) × (1 + α·d)`:
+- **At ~3% discount**: profit is maximised — small AOV/orders lift, margin still healthy.
+- **At ~5% discount**: profit equals baseline — volume lift exactly offsets margin loss.
+- **Beyond 5%**: every extra discount point burns profit, even though sales keep growing until ~11%.
 
-| α | Interpretation | %ΔSales at 10% disc |
-|---|---|---|
-| 0.0 | Orders unchanged (conservative) | +100% |
-| 0.5 | Mild lift | +110% |
-| 1.5 | Promo-elastic market | +130% |
+If the goal is **growth at all costs** (e.g., market-share play), 10–12% maximises top-line.
+If the goal is **earnings**, the sweet spot is **2–3%**.
 
-But the **profit-optimal discount stays ~2–3%** regardless of α — because once the discount exceeds baseline margin (12%), no amount of volume rescues unit economics.
+#### Caveats
+
+- Orders elasticity p = 0.22 — point estimate is +5% lift at 10% disc, but the data could support anything from 0 to +10%.
+- Quadratic R² ≈ 9% — significant but most variation is product mix / occasion, not discount.
+- COGS assumed fixed. If suppliers offer volume rebates at higher discounts (lower COGS), the profit curves shift up.
 
 ## Dashboard Building
 ### Overall
