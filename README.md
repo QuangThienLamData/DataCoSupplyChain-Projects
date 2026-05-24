@@ -194,6 +194,44 @@ qty(d)  =  qty(0) · exp( 13.36 · d  −  60.79 · d² )
 
 Quadratic R² ≈ 9%. Most order-size variation is product mix / occasion, not discount. Use these betas for **directional pricing decisions**, not tight revenue predictions.
 
+### What-if analysis by discount scenarios
+#### What-if table (orders held constant, baseline margin 12%)
+
+| Discount | %ΔAOV | %ΔSales | New margin | %ΔProfit |
+|---|---|---|---|---|
+| 0% | 0% | 0% | +12.0% | 0% |
+| 2% | +26% | +26% | +10.2% | **+7%** |
+| **2.6%** | **+33%** | **+33%** | **+9.7%** | **+8%** ← profit max |
+| 5% | +63% | +63% | +7.4% | 0% |
+| 8% | +91% | +91% | +4.3% | −31% |
+| **11%** | **+101%** | **+101%** | +1.1% | −81% ← sales max |
+| 12% | +99% | +99% | 0.0% | **−100%** (margin gone) |
+| 15% | +82% | +82% | −3.5% | −154% (losing money on each sale) |
+| 20% | +24% | +24% | −10.0% | −204% |
+
+## Optimal discount
+
+| Goal | Optimal discount | Result |
+|---|---|---|
+| **Maximise sales** | ~11% | Sales 2.0× baseline (profit dies) |
+| **Maximise profit** | ~2.6% | Sales +33%, profit +8% |
+| **Breakeven margin** | 12% | Beyond this every order loses money |
+
+#### Sensitivity — what if discount also brings more orders?
+
+Add `num_orders(d) = num_orders(0) × (1 + α·d)`:
+
+| α | Interpretation | %ΔSales at 10% disc |
+|---|---|---|
+| 0.0 | Orders unchanged (conservative) | +100% |
+| 0.5 | Mild lift | +110% |
+| 1.5 | Promo-elastic market | +130% |
+
+But the **profit-optimal discount stays ~2–3%** regardless of α — because once the discount exceeds baseline margin (12%), no amount of volume rescues unit economics.
+
+#### Caveat
+
+Quadratic R² ≈ 9%. Use these betas for **directional pricing decisions**, not tight revenue predictions. Most order-size variation is product mix / occasion, not discount.
 
 ## Dashboard Building
 ### Overall
