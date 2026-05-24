@@ -309,5 +309,92 @@ If the goal is **earnings**, the sweet spot is **2–3%**.
 ### Forecast
 <img width="1163" height="666" alt="image" src="https://github.com/user-attachments/assets/c1522b79-629e-4ecd-88ff-009f76280f5a" />
 
+## Forecasting Pipeline (M1 → M2 → M3 → M4)
 
+End-to-end stack that turns the cleaned monthly/daily product panel into a 6-month forward revenue forecast (Feb–Jul 2018, as-of 2018-01-31), using **all 118 products** (no cohort filter).
+
+```
+                              ┌──────────────┐
+                              │    M3 Risk   │  fraud/cancel/late XGB
+                              │              │  + NOAA HURDAT2 Tier 1–3
+                              └──────┬───────┘  disaster_index + drag
+                                     │
+                                     ▼
+                   ┌────────────┬─────────────┬──────────────┐
+                   │ M1 Demand  │ M2 Elast.   │ M4 Sales     │
+                   │ SARIMAX +  │ Pooled-FE β │  = Monte     │
+                   │ TimesFM    │  ≈ −0.69    │    Carlo of  │
+                   │ exog=M3    │             │  M1 × M2 × M3│
+                   └────────────┴─────────────┴──────┬───────┘
+                                                    ▼
+                                              quantile bands
+                                              (q10/q50/q90)
+
+  Portfolio overlay (daily, dashboard-native):
+    ┌──────────────────┐     ┌──────────────────────┐     ┌─────────────────────────┐
+    │ M1 Num Orders    │  ×  │ M4 AOV               │  =  │ M4 Total Sales (daily)  │
+    │ count(distinct   │     │ revenue / orders     │     │  identity: AOV × Orders │
+    │  Order Id)       │     │ TimesFM, pre-storm   │     │                         │
+    └──────────────────┘     └──────────────────────┘     └─────────────────────────┘
+```
+
+### Models at a glance
+
+| Model | Granularity | Target | Method | Output |
+|---|---|---|---|---|
+| **M1 Demand** | per-product × month/day | `gross_qty` (basket size) | SARIMAX (monthly, exog = disaster_index) · TimesFM pre-storm context (daily) | quantile forecast |
+| **M1 Num Orders** | portfolio × day | `count(distinct order_id)` | TimesFM single-series, pre-storm origin (2017-08-31) | quantile forecast |
+| **M2 Elasticity** | pool of products | own-price elasticity β | OLS log(qty) ~ log(price) with product FE | one β ≈ −0.55 to −0.69 |
+| **M3 Risk** | per-product × day | `disaster_drag_index`, fraud/cancel/late rates | XGBoost on order features · NOAA HURDAT2 Tier 1 (historical) + Tier 2 (NHC 5–7d cone) + Tier 3 (NOAA CPC seasonal outlook) | per-product risk |
+| **M4 Sales (per-product)** | per-product × month/day | `revenue_realized` | Monte Carlo: `qty(M1) × price(M2 elasticity) × (1 − drag(M3))`. Production uses **Tier-2+3 forward** disaster, not historical Tier-1. | revenue forecast |
+| **M4 Total Sales (portfolio)** | portfolio × day | `total revenue / day` | Identity: `AOV(d) × Number_of_Orders(d)`. AOV forecast via TimesFM pre-storm; Orders read from M1 Num Orders. | revenue forecast |
+| **M5 Anomaly** | per-series | anomaly flags | STL + Isolation Forest + forecast-deviation | 4 critical / 654 total alerts; correctly re-detects Maria & Irma |
+
+### Pipeline data flow
+
+1. **M3 first** — builds the disaster index from NOAA HURDAT2 hurricane tracks (Tier 1 historical) plus NHC cone forecasts (Tier 2, 5–7 days) and NOAA CPC seasonal outlook (Tier 3, 90 days). Same model produces `disaster_drag_index` (revenue-lag convolution, peak ~M+2).
+2. **M1 next** — SARIMAX fitted per product with `disaster_index` as an exogenous regressor. For the daily forward forecast, TimesFM is fed pre-storm context (cut at 2017-08-31) to preserve quantile-band variance; a recovery factor `rf = 1 − β × drag × (1 − strength)` damps the forecast for products with high storm exposure.
+3. **M1 Num Orders in parallel** — portfolio-level count(distinct Order Id) per day, forecast with TimesFM (single series, pre-storm origin). Feeds the dashboard "Total Orders" panel and the M4 Total Sales identity.
+4. **M2 in parallel** — pooled-FE elasticity from the monthly panel (β ≈ −0.69, narrow discount variation in the dataset so SE is wide).
+5. **M4 last — two complementary views:**
+   - **Per-product** (`m4_sales*.parquet`): Monte Carlo over qty(M1) × elasticity(M2) × (1 − drag(M3)) per (product, day), then summed. Good for cohort/category drill-downs.
+   - **Portfolio identity** (`m4_total_sales_daily.parquet`): `AOV(d) × Num_Orders(d)`. Cleaner at company aggregate, dashboard-native, sidesteps cohort-mix issues.
+
+### Validation metrics — all 118 products
+
+#### M1 demand (`gross_qty`)
+
+| Slice | Model | WAPE | sMAPE | Coverage 80% |
+|---|---|---|---|---|
+| val (2017-01 → 2017-06) | timesfm | **0.142** | 0.62 | 0.67 |
+| val | seasonal_naive | 0.156 | 0.65 | 0.80 |
+| val | sarima | 0.166 | 0.65 | 0.63 |
+| val | sarimax | 0.178 | 0.63 | 0.65 |
+| test (2017-07 → 2018-01) | **timesfm** | **1.365** | 1.37 | **0.80** |
+| test | seasonal_naive | 1.521 | 1.22 | 0.70 |
+| test | sarima/sarimax | diverged (>100) | — | — |
+
+TimesFM wins both windows. SARIMA/SARIMAX diverged on sparse Cohort B products in the test slice (numerical instability on near-zero history). Test WAPE >1 across the board because no model can anticipate the 2017-10-02 data-quality break (54 Cohort A products dropping to zero, 64 Cohort B products taking over with a synthetic pattern).
+
+#### M4 sales (`revenue_realized`)
+
+| Slice | Spec | WAPE | Coverage 80% |
+|---|---|---|---|
+| val | pre-risk vs gross | **0.151** | 0.23 |
+| val | forward-risk-adj (Tier 2+3) vs realized | **0.195** | 0.22 |
+| test | pre-risk vs gross | 1.159 | 0.09 |
+| test | forward-risk-adj (Tier 2+3) vs realized | **1.089** | 0.08 |
+
+Val WAPE ~20% is the headline accuracy in a clean window. Test WAPE deteriorates because of the same structural break (forecast assumes business-as-usual; actual revenue collapsed Oct→Jan: $1.03M → $599K → $481K → $317K). Forward-risk-adj (Tier-2+3) outperforms pre-risk on the test slice because the disaster damping kicks in correctly during hurricane season.
+
+### Headline 6-month forecast (Feb–Jul 2018)
+
+| Metric | p10 | **p50** | p90 |
+|---|---|---|---|
+| **Total Sales (M4 portfolio identity)** | **$5.4M** | **$6.6M** | **$7.9M** |
+| Portfolio revenue (M4 per-product daily) | $3.7M | $5.31M | $7.5M |
+| Total orders (M1 num_orders) | 9,585 | **10,337** | 11,089 |
+| Total quantity (M1 demand) | ~46K | **~60K** | ~83K |
+
+The two M4 views diverge by ~$1.3M at p50 ($6.6M identity vs $5.3M per-product). The identity model is closer to the historical baseline (~$1M/month × 6 = $6M). The per-product Monte Carlo is more conservative because TimesFM produced near-zero forecasts for sparse Cohort B products. Treat the identity as the headline; per-product as the lower bound.
 
