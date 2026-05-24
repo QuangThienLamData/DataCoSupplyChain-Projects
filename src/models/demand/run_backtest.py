@@ -144,9 +144,12 @@ def run() -> None:
     log.info("loading panel + meta (M1 target = %s)", TARGET_COL)
     panel = _retarget_panel(pd.read_parquet(PANEL_PATH))
     meta = pd.read_parquet(META_PATH)
-    cohort_a = meta.loc[meta["cohort"] == "A_active", "product_card_id"].tolist()
-    cohort_b = meta.loc[meta["cohort"] == "B_sparse", "product_card_id"].tolist()
-    log.info("cohort A = %d products, cohort B = %d products", len(cohort_a), len(cohort_b))
+    # Use all products (no cohort split). Cohort B's sparse history produces
+    # near-zero TimesFM forecasts but its post-Oct-2017 actuals are non-zero
+    # and required for honest portfolio validation.
+    cohort_a = meta["product_card_id"].tolist()
+    cohort_b = []
+    log.info("forecasting all products: %d", len(cohort_a))
 
     # Init forecasters once; TimesFM model loads on first call.
     snaive = SeasonalNaiveForecaster()
