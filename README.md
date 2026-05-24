@@ -229,10 +229,6 @@ Add `num_orders(d) = num_orders(0) × (1 + α·d)`:
 
 But the **profit-optimal discount stays ~2–3%** regardless of α — because once the discount exceeds baseline margin (12%), no amount of volume rescues unit economics.
 
-#### Caveat
-
-Quadratic R² ≈ 9%. Use these betas for **directional pricing decisions**, not tight revenue predictions. Most order-size variation is product mix / occasion, not discount.
-
 ## Dashboard Building
 ### Overall
 <img width="1168" height="670" alt="image" src="https://github.com/user-attachments/assets/7de5eb0c-e501-4551-b524-c07c64f37c04" />
