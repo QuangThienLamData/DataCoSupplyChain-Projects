@@ -212,26 +212,27 @@ Let:
   - P = list price (per unit)
   - C = COGS per unit (unchanged by the discount — key assumption)
   - m₀ = baseline gross margin (when d = 0) → from your dashboard, 12%
-
+```
   Baseline accounting:
   profit₀  =  P − C
   m₀       =  (P − C) / P
   ⟹  C    =  P × (1 − m₀)
-
+```
   Apply the discount
 
   New selling price: P × (1 − d)
 
   COGS doesn't change (you still pay your supplier the same amount), so:
-
+```
   new_profit  =  P(1 − d)  −  C
               =  P(1 − d)  −  P(1 − m₀)
               =  P × (m₀ − d)
-
+```
   New margin = new profit / new revenue:
-
+```
   margin(d)  =  P(m₀ − d) / [P(1 − d)]
              =  (m₀ − d) / (1 − d)
+```
 
 #### Sale change formula
 
